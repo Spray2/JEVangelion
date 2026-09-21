@@ -88,6 +88,18 @@ def test_a_pre_post_run_injects_the_decisions_and_verifies_the_output():
     assert "price" in rendered and "Gentile cliente" in rendered
 
 
+def test_runtime_inputs_left_in_the_residual_prompt_reach_the_generation():
+    # Without this the main LLM writes a reply to a message it never saw.
+    plan = json.loads(V26_PLAN.to_json())
+    plan["residual_prompt"] = "Rispondi a: {{customer_message}}. Esito: {{q3}}."
+    jev = StagedJevClient({"shape": ("mixed", 1.0)},
+                          overrides={"q2": (3.0, 0.9), "q3": ("price", 0.9)})
+    llm = ScriptedLLMClient([json.dumps(plan), "Gentile cliente"])
+    run(V26_PLAN.request, jev=jev, llm=llm,
+        inputs={"customer_message": "disdiciamo il contratto"})
+    assert llm.prompts[1][1] == "Rispondi a: disdiciamo il contratto. Esito: price."
+
+
 def test_a_failed_post_check_costs_one_regeneration_then_escalates():
     jev = StagedJevClient({"shape": ("generative", 0.99), "g4": 0.9}, defaults=0.1)
     llm = ScriptedLLMClient([V21_PLAN.to_json(), "erste Fassung", "zweite Fassung"])

@@ -183,7 +183,8 @@ def _index_payload(payload: Any) -> dict[str, Any]:
         # A server that wraps its answers, e.g. {"answers": {...}}.
         for wrapper in ("answers", "results", "questions"):
             inner = payload.get(wrapper)
-            if inner is not None and len(payload) == 1:
+            # typesafe-jev puts model/usage/meta next to its answers.
+            if inner is not None and set(payload) - {wrapper} <= {"model", "usage", "meta"}:
                 return _index_payload(inner)
         return dict(payload)
     if isinstance(payload, list):
@@ -220,7 +221,7 @@ def _parse_one(q: Question, raw: Any) -> Answer:
 
     confidence = _first_float(raw, "confidence", "conf", "certainty")
     if q.type is QuestionType.NOUL:
-        probability = _first_float(raw, "probability", "p", "value", "score", "yes")
+        probability = _first_float(raw, "probability", "noul", "p", "value", "score", "yes")
         if probability is None:
             raise DriverError(f"{q.id}: a noul answer needs a probability")
         return Answer(q.id, QuestionType.NOUL, probability=probability)

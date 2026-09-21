@@ -239,18 +239,18 @@ def resolved_facts(result: RunResult, plan: Plan) -> dict[str, str]:
     """
     facts: dict[str, str] = {}
     for base_id, answer in result.scalar.items():
-        facts[base_id] = _render(answer, plan.question(base_id))
+        facts[base_id] = render_answer(answer, plan.question(base_id))
     for base_id in {inst.base_id for inst in result.instances if inst.item_key is not None}:
         parts = []
         for key in result.item_keys:
             answer = result.for_item(key).get(base_id)
             if answer is not None:
-                parts.append(f"{key}: {_render(answer, plan.question(base_id))}")
+                parts.append(f"{key}: {render_answer(answer, plan.question(base_id))}")
         facts[base_id] = "; ".join(parts)
     return facts
 
 
-def _render(answer: Answer, question: Question | None) -> str:
+def render_answer(answer: Answer, question: Question | None) -> str:
     if answer.type is QuestionType.NOUL:
         p = answer.probability or 0.0
         if answer.is_uncertain:
