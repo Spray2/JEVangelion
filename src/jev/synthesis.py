@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Any, Sequence
 
 from .checks import VerificationReport
 from .client import JevClient
@@ -20,7 +20,7 @@ from .contract import Plan, PolicyRule
 from .lint import LintReport
 from .policy import PolicyOutcome
 from .primitives import Answer, Question, QuestionType
-from .runtime import RunResult
+from .runtime import RunResult, render_answer
 
 #: A request that states its own condition ("se X, allora Y") is not inventing a
 #: rule when the policy encodes it.
@@ -167,27 +167,62 @@ def _verdict(answer: Answer, question: Question | None) -> str:
     return f"{answer.option} ({answer.confidence or 0.0:.2f})"
 
 
+def assessments(result: RunResult, plan: Plan) -> list[tuple[str, str]]:
+    """Each pre/core decision as (question asked of the input, answer it got)."""
+    pairs: list[tuple[str, str]] = []
+    for instance in result.instances:
+        answer = result.answers.get(instance.question.id)
+        if answer is None:
+            continue
+        question = plan.question(instance.base_id)
+        prefix = f"{instance.item_key}: " if instance.item_key else ""
+        text = question.instructions if question else instance.base_id
+        pairs.append((f"{prefix}{text}", render_answer(answer, question)))
+    return pairs
+
+
 def check_consistency(
-    jev: JevClient, decisions: Sequence[str], output: str
+    jev: JevClient,
+    decisions: Sequence[str | tuple[str, str]],
+    output: str,
+    source: Any = None,
 ) -> list[str]:
-    """Ask JEV whether the generated text agrees with the decisions injected into it."""
+    """Ask JEV whether the generated text agrees with the decisions injected into it.
+
+    A decision is a question asked of the input, not of `output`. Handed over as
+    a bare "question -> answer" line, JEV re-asks it of the output and answers
+    "no" to a perfectly good reply (V26: 0.11). Passing the question and the
+    answer apart, next to the input they were asked about, fixes that.
+    """
     if not decisions or not output:
         return []
+    about = "`input`" if source is not None else "the user's input"
     questions = [
         Question(
             id=f"d{i}",
             type=QuestionType.NOUL,
-            instructions=f"Is `output` consistent with this assessment: \"{d}\"?",
+            instructions=(
+                f"`assessments.d{i}` is a question that was asked about {about} and the "
+                "answer it got. Does `output` take that answer into account when it "
+                f"responds to {about}?"
+            ),
         )
-        for i, d in enumerate(decisions)
+        for i in range(len(decisions))
     ]
-    answers = jev.ask({"output": output, "decisions": list(decisions)}, questions)
+    state: dict[str, Any] = {} if source is None else {"input": source}
+    state["output"] = output
+    state["assessments"] = {
+        f"d{i}": {"question": d[0], "answer": d[1]} if isinstance(d, tuple) else d
+        for i, d in enumerate(decisions)
+    }
+    answers = jev.ask(state, questions)
     out: list[str] = []
     for i, d in enumerate(decisions):
         a = answers.get(f"d{i}")
         value = float(a.probability or 0.0) if a else 0.0
         if value < 0.5:
-            out.append(f"{d} ({value:.2f})")
+            label = f"{d[0].rstrip('?')} -> {d[1]}" if isinstance(d, tuple) else d
+            out.append(f"{label} ({value:.2f})")
     return out
 
 

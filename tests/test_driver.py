@@ -241,3 +241,24 @@ def test_the_probe_flags_an_option_outside_the_taxonomy():
         "p3": {"option": "prezzo", "confidence": 0.9},
     })
     assert any("not one of the option ids" in w for w in reading.warnings)
+
+
+def test_the_typesafe_jev_wire_shape_is_read_as_is():
+    # What the typesafe-jev MCP server actually returns: answers wrapped next to
+    # model/usage/meta, and a Noul under the key "noul".
+    questions = [
+        Question("p1", QuestionType.NOUL, "?"),
+        CHOICE,
+    ]
+    payload = {
+        "model": "jev-1.13.0",
+        "answers": {
+            "p1": {"type": "noul", "noul": 0.98},
+            "q3": {"type": "choice", "choice": "price", "confidence": 0.99},
+        },
+        "usage": {"input_tokens": 526},
+        "meta": {"latency_ms": 651.4},
+    }
+    got = parse_answers(questions, payload)
+    assert got["p1"].probability == 0.98
+    assert got["q3"].option == "price" and got["q3"].confidence == 0.99

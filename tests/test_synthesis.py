@@ -11,6 +11,7 @@ from jev.lint import CheckResult, LintReport
 from jev.synthesis import (
     IT,
     applied_rules,
+    assessments,
     check_consistency,
     describe_decisions,
     implicit_rules,
@@ -57,6 +58,33 @@ def test_a_disagreement_between_a_decision_and_the_text_is_reported():
     client = RecordedJevClient({"d0": 0.2, "d1": 0.9})
     found = check_consistency(client, ["review 2 is founded", "review 1 is founded"], "a reply")
     assert found == ["review 2 is founded (0.20)"]
+
+
+def test_a_decision_reaches_jev_as_a_question_about_the_input_with_its_answer():
+    # V26: handed "question -> yes" with no input, JEV re-asked the question of
+    # the reply and flagged a good retention reply (0.11).
+    client = RecordedJevClient({"d0": 0.3})
+    found = check_consistency(
+        client,
+        [("Does the message threaten to withdraw?", "yes (0.92)")],
+        "Gentile cliente, restiamo insieme.",
+        source="Se il prezzo non cambia disdiciamo.",
+    )
+    state, ids = client.calls[0]
+    assert ids == ("d0",)
+    assert state["input"] == "Se il prezzo non cambia disdiciamo."
+    assert state["assessments"]["d0"] == {
+        "question": "Does the message threaten to withdraw?", "answer": "yes (0.92)"
+    }
+    assert found == ["Does the message threaten to withdraw -> yes (0.92) (0.30)"]
+
+
+def test_assessments_keep_item_keys_and_render_answers_for_jev():
+    client = RecordedJevClient({"q2": (1.0, 0.9), "q3": ("price", 0.9)})
+    result = run_rounds(client, V26_PLAN, {"customer_message": "forse cambiamo"})
+    pairs = assessments(result, V26_PLAN)
+    assert len(pairs) == 2
+    assert ("price" in pairs[1][1]) and pairs[1][0] == V26_PLAN.question("q3").instructions
 
 
 def test_no_decisions_means_no_consistency_call():

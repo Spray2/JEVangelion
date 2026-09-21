@@ -9,6 +9,7 @@ retry on a failed lint, one regeneration on a failed post check, then escalate.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -24,8 +25,8 @@ from .synthesis import (
     IT,
     Labels,
     Synthesis,
+    assessments,
     check_consistency,
-    describe_decisions,
     synthesize,
 )
 from .checks import guess_language
@@ -107,7 +108,11 @@ def run(
         )
         return result
 
-    prompt = fill_residual_prompt(plan, facts)
+    # Runtime inputs fill any {{name}} left in the residual prompt, so the main
+    # LLM can see the data it is answering; decisions take precedence.
+    bound = {k: v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+             for k, v in inputs.items()}
+    prompt = fill_residual_prompt(plan, {**bound, **facts})
     result.generated = llm.complete("", prompt)
 
     if plan.jev_role.has_post:
@@ -124,8 +129,9 @@ def run(
 
     disagreements: list[str] = []
     if result.rounds is not None and result.generated:
-        decisions, _ = describe_decisions(result.rounds, plan)
-        disagreements = check_consistency(jev, decisions, result.generated)
+        disagreements = check_consistency(
+            jev, assessments(result.rounds, plan), result.generated, source=inputs or None
+        )
 
     result.synthesis = synthesize(
         plan, result.rounds, result.policy, result.verification,
