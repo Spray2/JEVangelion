@@ -130,7 +130,10 @@ def run(
     disagreements: list[str] = []
     if result.rounds is not None and result.generated:
         disagreements = check_consistency(
-            jev, assessments(result.rounds, plan), result.generated, source=inputs or None
+            jev,
+            assessments(result.rounds, plan, result.policy),
+            result.generated,
+            source=inputs or None,
         )
 
     result.synthesis = synthesize(

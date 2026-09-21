@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from jev.benchmarks.plans import V26_PLAN
-from jev.client import RecordedJevClient
+from jev.client import CallableJevClient, RecordedJevClient
 from jev.contract import Plan, PolicyRule
 from jev.policy import PolicyOutcome, TriggeredRule
 from jev.runtime import run_rounds
@@ -11,6 +11,7 @@ from jev.lint import CheckResult, LintReport
 from jev.synthesis import (
     IT,
     applied_rules,
+    Assessment,
     assessments,
     check_consistency,
     describe_decisions,
@@ -66,7 +67,7 @@ def test_a_decision_reaches_jev_as_a_question_about_the_input_with_its_answer():
     client = RecordedJevClient({"d0": 0.3})
     found = check_consistency(
         client,
-        [("Does the message threaten to withdraw?", "yes (0.92)")],
+        [Assessment("Does the message threaten to withdraw?", "yes (0.92)")],
         "Gentile cliente, restiamo insieme.",
         source="Se il prezzo non cambia disdiciamo.",
     )
@@ -82,9 +83,46 @@ def test_a_decision_reaches_jev_as_a_question_about_the_input_with_its_answer():
 def test_assessments_keep_item_keys_and_render_answers_for_jev():
     client = RecordedJevClient({"q2": (1.0, 0.9), "q3": ("price", 0.9)})
     result = run_rounds(client, V26_PLAN, {"customer_message": "forse cambiamo"})
-    pairs = assessments(result, V26_PLAN)
-    assert len(pairs) == 2
-    assert ("price" in pairs[1][1]) and pairs[1][0] == V26_PLAN.question("q3").instructions
+    found = assessments(result, V26_PLAN)
+    assert len(found) == 2
+    assert "price" in found[1].answer
+    assert found[1].question == V26_PLAN.question("q3").instructions
+    assert all(a.so is None for a in found)  # no policy given, no consequences
+
+
+def test_a_fired_rule_travels_with_the_decision_it_depends_on():
+    # H07: "late > 30 days -> yes" says nothing about tone; the policy does.
+    client = RecordedJevClient({"q2": (3.0, 0.9), "q3": ("price", 0.9)})
+    result = run_rounds(client, V26_PLAN, {"customer_message": "disdiciamo"})
+    policy = PolicyOutcome(triggered=[
+        TriggeredRule(PolicyRule("q2.score >= 3", "use a formal tone")),
+        TriggeredRule(PolicyRule("q2.score >= 2", "offer a call")),
+        TriggeredRule(PolicyRule("any.confidence < 0.5", "escalate")),
+    ])
+    by_id = {a.question: a for a in assessments(result, V26_PLAN, policy)}
+    q2 = by_id[V26_PLAN.question("q2").instructions]
+    q3 = by_id[V26_PLAN.question("q3").instructions]
+    assert q2.so == "use a formal tone; offer a call"
+    assert q3.so is None  # the rules never mention q3, and escalation is not an action
+
+    seen = []
+
+    def ask(state, questions):
+        seen.append((state, questions))
+        return RecordedJevClient({"d0": 0.9, "d1": 0.9}).ask(state, questions)
+
+    check_consistency(CallableJevClient(ask), [q2, q3], "Spettabile Cliente", source="x")
+    state, asked = seen[0]
+    assert state["assessments"]["d0"]["so"] == "use a formal tone; offer a call"
+    assert "so" not in state["assessments"]["d1"]
+    # Only a decision with consequences gets the question that names `so`; the
+    # other keeps the wording validated on V26/V09/C13/C03/V18.
+    questions = {q.id: q.instructions for q in asked}
+    assert "under `so`" in questions["d0"]
+    assert questions["d1"] == (
+        "`assessments.d1` is a question that was asked about `input` and the answer it "
+        "got. Does `output` take that answer into account when it responds to `input`?"
+    )
 
 
 def test_no_decisions_means_no_consistency_call():

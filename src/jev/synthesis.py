@@ -167,9 +167,35 @@ def _verdict(answer: Answer, question: Question | None) -> str:
     return f"{answer.option} ({answer.confidence or 0.0:.2f})"
 
 
-def assessments(result: RunResult, plan: Plan) -> list[tuple[str, str]]:
-    """Each pre/core decision as (question asked of the input, answer it got)."""
-    pairs: list[tuple[str, str]] = []
+@dataclass(frozen=True)
+class Assessment:
+    """A pre/core decision as JEV must read it when checking the generated text."""
+
+    question: str
+    answer: str
+    #: What the policy made of that answer ("use a formal tone"), if a rule fired.
+    so: str | None = None
+
+    def label(self) -> str:
+        return f"{self.question.rstrip('?')} -> {self.answer}"
+
+    def to_state(self) -> dict[str, str]:
+        out = {"question": self.question, "answer": self.answer}
+        if self.so:
+            out["so"] = self.so
+        return out
+
+
+def assessments(
+    result: RunResult, plan: Plan, policy: PolicyOutcome | None = None
+) -> list[Assessment]:
+    """Each pre/core decision, with the actions of the policy rules it fired.
+
+    H07: the decision is "more than 30 days late -> yes", but what the reply must
+    do about it ("use a formal tone") lives in the policy. Without it JEV cannot
+    link a formal reply to the decision and flags a good one (0.37 -> 0.71).
+    """
+    out: list[Assessment] = []
     for instance in result.instances:
         answer = result.answers.get(instance.question.id)
         if answer is None:
@@ -177,13 +203,22 @@ def assessments(result: RunResult, plan: Plan) -> list[tuple[str, str]]:
         question = plan.question(instance.base_id)
         prefix = f"{instance.item_key}: " if instance.item_key else ""
         text = question.instructions if question else instance.base_id
-        pairs.append((f"{prefix}{text}", render_answer(answer, question)))
-    return pairs
+        mentions = re.compile(r"\b" + re.escape(instance.base_id) + r"\b")
+        actions = [
+            t.rule.then
+            for t in (policy.triggered if policy else [])
+            if not t.escalates
+            and t.item_key in (None, instance.item_key)
+            and mentions.search(t.rule.when)
+        ]
+        out.append(Assessment(f"{prefix}{text}", render_answer(answer, question),
+                              "; ".join(actions) or None))
+    return out
 
 
 def check_consistency(
     jev: JevClient,
-    decisions: Sequence[str | tuple[str, str]],
+    decisions: Sequence[str | Assessment],
     output: str,
     source: Any = None,
 ) -> list[str]:
@@ -197,22 +232,28 @@ def check_consistency(
     if not decisions or not output:
         return []
     about = "`input`" if source is not None else "the user's input"
-    questions = [
-        Question(
-            id=f"d{i}",
-            type=QuestionType.NOUL,
-            instructions=(
-                f"`assessments.d{i}` is a question that was asked about {about} and the "
-                "answer it got. Does `output` take that answer into account when it "
-                f"responds to {about}?"
-            ),
+
+    def instructions(i: int, d: str | Assessment) -> str:
+        # Naming `so` in the question is what makes JEV use it: on H07 the same
+        # state scores a good formal reminder 0.54 without it, 0.86 with it.
+        what = (
+            ", the answer it got and, under `so`, what that answer requires of the response"
+            if isinstance(d, Assessment) and d.so
+            else " and the answer it got"
         )
-        for i in range(len(decisions))
+        return (
+            f"`assessments.d{i}` is a question that was asked about {about}{what}. "
+            f"Does `output` take that answer into account when it responds to {about}?"
+        )
+
+    questions = [
+        Question(id=f"d{i}", type=QuestionType.NOUL, instructions=instructions(i, d))
+        for i, d in enumerate(decisions)
     ]
     state: dict[str, Any] = {} if source is None else {"input": source}
     state["output"] = output
     state["assessments"] = {
-        f"d{i}": {"question": d[0], "answer": d[1]} if isinstance(d, tuple) else d
+        f"d{i}": d.to_state() if isinstance(d, Assessment) else d
         for i, d in enumerate(decisions)
     }
     answers = jev.ask(state, questions)
@@ -221,7 +262,7 @@ def check_consistency(
         a = answers.get(f"d{i}")
         value = float(a.probability or 0.0) if a else 0.0
         if value < 0.5:
-            label = f"{d[0].rstrip('?')} -> {d[1]}" if isinstance(d, tuple) else d
+            label = d.label() if isinstance(d, Assessment) else d
             out.append(f"{label} ({value:.2f})")
     return out
 
