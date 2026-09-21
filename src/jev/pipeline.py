@@ -62,6 +62,7 @@ def run(
     gate_variant: GateVariant = GATE_V2,
     compiler_version: str = COMPILER_PROMPT_VERSION,
     labels: Labels | None = None,
+    lint_with_jev: bool = True,
 ) -> PipelineResult:
     inputs = dict(inputs or {})
     labels = labels or _labels_for(request)
@@ -79,7 +80,9 @@ def run(
         result.notes.append("no JEV role: the request went straight to the main LLM")
         return result
 
-    plan, lint, retried = _compile_and_lint(llm, jev, request, gate, compiler_version)
+    plan, lint, retried = _compile_and_lint(
+        llm, jev if lint_with_jev else None, request, gate, compiler_version
+    )
     result.plan, result.lint, result.lint_retried = plan, lint, retried
     if lint.blocked:
         result.blocked = True
@@ -133,8 +136,14 @@ def run(
 
 
 def _compile_and_lint(
-    llm: LLMClient, jev: JevClient, request: str, gate: GateDecision, version: str
+    llm: LLMClient, jev: JevClient | None, request: str, gate: GateDecision, version: str
 ) -> tuple[Plan, LintReport, bool]:
+    """``jev=None`` runs only the deterministic checks.
+
+    The semantic checks cost one JEV call per distinct state — eight on a
+    pre+post plan — which is a lot in an interactive loop. They are consultivo
+    by design; the code checks, which block, always run.
+    """
     plan = compile_plan(llm, request, gate, version=version)
     report = lint_plan(plan, jev)
     if report.ok:

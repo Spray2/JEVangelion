@@ -26,6 +26,28 @@ Python 3.11+, nessuna dipendenza a runtime.
 
 ## Uso
 
+Ci sono due modi di collegare i modelli, e la scelta dipende da dove gira la
+pipeline.
+
+### Driver mode — dentro una sessione Claude
+
+Se Claude è già l'LLM principale e ha già l'MCP di JEV collegato, la pipeline
+non deve chiamare niente: **chiede**. Si ferma a ogni chiamata, dice cosa serve,
+riprende con la risposta. Lo stato è un file JSON che sopravvive fra un turno e
+l'altro.
+
+```bash
+jev-drive init   --state run.json --request "..." --inputs inputs.json
+jev-drive submit --state run.json --result -      # la risposta, su stdin
+# ...finché il driver stampa il risultato invece di una chiamata...
+jev-drive result --state run.json
+```
+
+Il protocollo, le forme di risposta accettate e il costo in chiamate sono in
+[`docs/driver.md`](docs/driver.md).
+
+### Processo autonomo — con le proprie credenziali
+
 ```python
 from jev.client import CallableJevClient, CallableLLMClient
 from jev.pipeline import run
@@ -42,6 +64,10 @@ esito = run(
 )
 print(esito.text)
 ```
+
+La libreria non legge nessun file di configurazione e nessuna variabile
+d'ambiente: `JevClient` e `LLMClient` sono due `Protocol` in `jev.client`, e
+l'host decide cosa ci sta dietro.
 
 Una corsa completa con modelli finti, senza rete:
 
@@ -74,6 +100,8 @@ misura questo codice, non il modello.
 | `jev.checks` | Post check JEV + controlli in codice legati al verbo (lunghezza, lingua) |
 | `jev.synthesis` | Decisioni, regole non richieste dall'utente, discordanze |
 | `jev.pipeline` | Orchestrazione con i budget di retry della specifica |
+| `jev.driver` | Driver mode: la pipeline chiede le chiamate invece di farle |
+| `jev.cli` | `jev-drive`, il ciclo init / submit / result |
 | `jev.benchmarks` | I 57 casi (C01–C15, V01–V30, H01–H12) e i piani di riferimento |
 
 ## Scelte di progetto
@@ -93,6 +121,12 @@ di escalation.
 **Il lint è consultivo tranne che in codice.** Un controllo JEV sotto 0,5
 rimanda il piano al compilatore una volta e poi passa con un avviso; un
 controllo in codice fallito blocca sempre.
+
+**Il driver funziona per replay.** Ogni stadio fra due chiamate ai modelli è
+Python puro, quindi la corsa è interamente determinata dalla sequenza di
+risposte: il driver le registra e riesegue `run()` dall'inizio a ogni passo.
+Niente stato da serializzare, e un `fingerprint` per chiamata impedisce di
+servire una risposta registrata a una chiamata diversa.
 
 **I budget di retry sono quelli della specifica**: una ricompilazione dopo un
 lint fallito, una rigenerazione dopo un post check fallito, poi escalation.

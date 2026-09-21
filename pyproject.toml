@@ -16,6 +16,7 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 jev-bench = "jev.eval:main"
+jev-drive = "jev.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
