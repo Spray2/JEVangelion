@@ -25,7 +25,14 @@ from typing import Any, Literal, Mapping, Sequence
 
 from .gate import GATE_V2, GATE_V3, GateVariant
 from .pipeline import PipelineResult, run
-from .primitives import JEV_MODEL_VERSION, Answer, Question, QuestionType
+from .primitives import (
+    JEV_MODEL_VERSION,
+    Answer,
+    ChoiceOption,
+    Question,
+    QuestionType,
+    ScoreLevel,
+)
 
 GATES: dict[str, GateVariant] = {"v2": GATE_V2, "v3": GATE_V3}
 
@@ -375,3 +382,112 @@ def _expected_answer_shape(questions: Sequence[dict[str, Any]]) -> dict[str, str
         "choice": "{\"option\": \"<option id>\", \"confidence\": <0-1>}",
     }
     return {q["id"]: shapes[q["type"]] for q in questions}
+
+
+# -- probing a real JEV server --------------------------------------------
+
+#: A minimal call covering all three primitives at once. Sending this to the
+#: real server, once, is what tells you the wire shape its answers come in —
+#: cheaper and clearer than discovering it halfway through a run.
+PROBE_STATE = {"text": "Se il prezzo non cambia entro venerdì disdiciamo il contratto."}
+
+PROBE_QUESTIONS: tuple[Question, ...] = (
+    Question(
+        id="p1",
+        type=QuestionType.NOUL,
+        instructions="Does `text` mention a deadline?",
+    ),
+    Question(
+        id="p2",
+        type=QuestionType.SCORE,
+        instructions="How firmly does `text` express an intention to leave?",
+        criteria=(
+            ScoreLevel("No mention of leaving", ("not happy with the last delivery",)),
+            ScoreLevel("Leaving mentioned as a possibility",
+                       ("we might look at other options",)),
+            ScoreLevel("Conditional ultimatum",
+                       ("if this is not fixed by Friday we will cancel",)),
+            ScoreLevel("Formal notice of cancellation",
+                       ("please consider this our notice of termination",)),
+        ),
+    ),
+    Question(
+        id="p3",
+        type=QuestionType.CHOICE,
+        instructions="What is the main reason for dissatisfaction in `text`?",
+        criteria=(
+            ChoiceOption("price", "The cost of the service or product"),
+            ChoiceOption("service", "How the customer was treated"),
+            ChoiceOption("other", "Anything else"),
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ProbeReading:
+    """What the parser made of a real answer, and what looks off."""
+
+    answers: dict[str, Answer]
+    warnings: list[str]
+    notes: list[str]
+
+
+def probe_call() -> dict[str, Any]:
+    return {
+        "state": PROBE_STATE,
+        "questions": [q.to_dict() for q in PROBE_QUESTIONS],
+        "expects": _expected_answer_shape([q.to_dict() for q in PROBE_QUESTIONS]),
+    }
+
+
+def read_probe(payload: Any) -> ProbeReading:
+    """Parse a real answer to :func:`probe_call` and report what is missing.
+
+    Everything here is about the wire shape, not about whether JEV judged well.
+    The one exception is the polarity note on the Noul: "yes" must be the high
+    value, and a server that inverts it would break every plan silently.
+    """
+    answers = parse_answers(PROBE_QUESTIONS, payload)
+    warnings: list[str] = []
+    notes: list[str] = []
+
+    noul = answers["p1"]
+    if noul.probability is not None and noul.probability < 0.5:
+        warnings.append(
+            "p1 came back below 0.5, but `text` does mention a deadline. Either the "
+            "server inverts the polarity of a Noul, or the answer was read from the "
+            "wrong field — every plan assumes \"yes\" is the high value."
+        )
+
+    score = answers["p2"]
+    if score.score is not None and float(score.score).is_integer():
+        warnings.append(
+            "p2 came back as a whole number. If the server only ever returns the "
+            "discrete level, gate v3 loses resolution: its `cost` threshold is 1.75 and "
+            "compares against the expected (fractional) level. Gate v2 is unaffected."
+        )
+    if score.confidence is None:
+        warnings.append(
+            "p2 came back without a confidence. The mandatory escalation rule is "
+            "`any.confidence < 0.5`, so without it a plan of Scores never escalates."
+        )
+
+    choice = answers["p3"]
+    if choice.option not in {o.id for o in PROBE_QUESTIONS[2].options}:
+        warnings.append(
+            f"p3 answered {choice.option!r}, which is not one of the option ids "
+            f"({', '.join(o.id for o in PROBE_QUESTIONS[2].options)}). The policy "
+            f"compares option ids literally."
+        )
+    if choice.confidence is None:
+        warnings.append(
+            "p3 came back without a confidence. The gate reads it to decide whether to "
+            "escalate on an unsure shape."
+        )
+
+    notes.append(f"noul  p1 -> probability {noul.probability}")
+    notes.append(f"score p2 -> level {score.score} (discrete {score.level}), "
+                 f"confidence {score.confidence}")
+    notes.append(f"choice p3 -> option {choice.option!r}, confidence {choice.confidence}")
+    return ProbeReading(answers=answers, warnings=warnings, notes=notes)

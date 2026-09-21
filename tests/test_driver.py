@@ -187,3 +187,57 @@ def test_a_boolean_answers_a_noul_but_not_a_score():
     assert parse_answers([NOUL], {"q1": True})["q1"].probability == 1.0
     with pytest.raises(DriverError, match="only answers a noul"):
         parse_answers([SCORE], {"q2": True})
+
+
+# -- the schema probe -----------------------------------------------------
+
+
+def test_the_probe_covers_all_three_primitives():
+    from jev.driver import probe_call
+
+    call = probe_call()
+    assert [q["type"] for q in call["questions"]] == ["noul", "score", "choice"]
+    assert set(call["expects"]) == {"p1", "p2", "p3"}
+
+
+def test_a_well_shaped_answer_raises_no_warning():
+    from jev.driver import read_probe
+
+    reading = read_probe({
+        "p1": 0.94,
+        "p2": {"score": 2.3, "confidence": 0.88},
+        "p3": {"option": "price", "confidence": 0.91},
+    })
+    assert reading.warnings == []
+    assert reading.answers["p2"].score == pytest.approx(2.3)
+
+
+def test_the_probe_flags_an_integer_only_score_and_missing_confidences():
+    from jev.driver import read_probe
+
+    reading = read_probe({"p1": 0.94, "p2": 2, "p3": "price"})
+    joined = " ".join(reading.warnings)
+    assert "whole number" in joined and "1.75" in joined
+    assert joined.count("without a confidence") == 2
+
+
+def test_the_probe_flags_an_inverted_noul():
+    from jev.driver import read_probe
+
+    reading = read_probe({
+        "p1": 0.03,
+        "p2": {"score": 2.3, "confidence": 0.9},
+        "p3": {"option": "price", "confidence": 0.9},
+    })
+    assert any("polarity" in w for w in reading.warnings)
+
+
+def test_the_probe_flags_an_option_outside_the_taxonomy():
+    from jev.driver import read_probe
+
+    reading = read_probe({
+        "p1": 0.94,
+        "p2": {"score": 2.3, "confidence": 0.9},
+        "p3": {"option": "prezzo", "confidence": 0.9},
+    })
+    assert any("not one of the option ids" in w for w in reading.warnings)

@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from .driver import Driver, DriverError, Transcript
+from .driver import Driver, DriverError, Transcript, probe_call, read_probe
 from .pipeline import PipelineResult
 
 
@@ -97,6 +97,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                            "cost; the blocking checks in code always run")
     init.add_argument("--force", action="store_true", help="overwrite an existing transcript")
 
+    probe = sub.add_parser(
+        "probe",
+        help="emit a one-off call covering all three primitives, then check its answer",
+    )
+    probe.add_argument("--check", help="file holding the answer, or '-' for stdin")
+
     with_state(sub.add_parser("next", help="show the pending call, or the result"))
 
     submit = with_state(sub.add_parser("submit", help="record an answer"))
@@ -111,12 +117,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     with_state(sub.add_parser("status", help="print a short human summary"))
 
     args = parser.parse_args(argv)
+    if args.command == "probe":
+        try:
+            return _probe(args)
+        except DriverError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     try:
         return _dispatch(args)
     except DriverError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+
+def _probe(args: argparse.Namespace) -> int:
+    """Find out the server's wire shape before committing to a run."""
+    if not args.check:
+        print(json.dumps(probe_call(), ensure_ascii=False, indent=2))
+        return 0
+    reading = read_probe(_read_payload(args.check, "jev"))
+    for note in reading.notes:
+        print(note)
+    if not reading.warnings:
+        print("\nthe answers map cleanly onto the three primitives")
+        return 0
+    print()
+    for warning in reading.warnings:
+        print(f"warning: {warning}")
+    return 1
 
 
 def _dispatch(args: argparse.Namespace) -> int:

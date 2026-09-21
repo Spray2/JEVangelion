@@ -27,6 +27,22 @@ Ogni chiamata porta un `fingerprint` (hash di state + domande, o di system +
 user). Se si modifica la richiesta o gli input a metà corsa, il replay se ne
 accorge e si ferma, invece di servire silenziosamente risposte sbagliate.
 
+## Prima di tutto: verificare lo schema del server
+
+La forma delle risposte dipende dal server MCP davanti a JEV. Una volta sola,
+per installazione:
+
+```bash
+jev-drive probe                                   # -> una chiamata con le tre primitive
+echo '<risposta grezza>' | jev-drive probe --check -
+```
+
+Il check dice cosa il parser ha letto e segnala ciò che si romperà: un Noul con
+polarità invertita, uno Score senza livelli frazionari (gate v3 cieco sotto la
+soglia 1,75), una Choice o uno Score senza confidence (escalation mai
+raggiungibile), un'opzione fuori dalla tassonomia. Esce con 1 se c'è almeno un
+avviso.
+
 ## Il ciclo
 
 ```bash

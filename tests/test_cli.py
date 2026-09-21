@@ -162,3 +162,21 @@ def _purposes(state, capsys, lint):
                          "--result", str(answer_file), "--fingerprint", call["fingerprint"])
     assert payload["status"] == "done"
     return purposes
+
+
+def test_probe_emits_a_call_then_grades_its_answer(tmp_path, capsys):
+    assert main(["probe"]) == 0
+    call = json.loads(capsys.readouterr().out)
+    assert [q["id"] for q in call["questions"]] == ["p1", "p2", "p3"]
+
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"p1": 0.94,
+                                "p2": {"score": 2.3, "confidence": 0.88},
+                                "p3": {"option": "price", "confidence": 0.91}}))
+    assert main(["probe", "--check", str(good)]) == 0
+    assert "map cleanly" in capsys.readouterr().out
+
+    poor = tmp_path / "poor.json"
+    poor.write_text(json.dumps({"p1": 0.94, "p2": 2, "p3": "price"}))
+    assert main(["probe", "--check", str(poor)]) == 1
+    assert "warning:" in capsys.readouterr().out

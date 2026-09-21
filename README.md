@@ -37,6 +37,7 @@ riprende con la risposta. Lo stato è un file JSON che sopravvive fra un turno e
 l'altro.
 
 ```bash
+jev-drive probe                                   # una volta: verifica lo schema JEV
 jev-drive init   --state run.json --request "..." --inputs inputs.json
 jev-drive submit --state run.json --result -      # la risposta, su stdin
 # ...finché il driver stampa il risultato invece di una chiamata...
@@ -101,7 +102,7 @@ misura questo codice, non il modello.
 | `jev.synthesis` | Decisioni, regole non richieste dall'utente, discordanze |
 | `jev.pipeline` | Orchestrazione con i budget di retry della specifica |
 | `jev.driver` | Driver mode: la pipeline chiede le chiamate invece di farle |
-| `jev.cli` | `jev-drive`, il ciclo init / submit / result |
+| `jev.cli` | `jev-drive`: `probe` per lo schema, poi init / submit / result |
 | `jev.benchmarks` | I 57 casi (C01–C15, V01–V30, H01–H12) e i piani di riferimento |
 
 ## Scelte di progetto
