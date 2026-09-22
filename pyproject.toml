@@ -13,10 +13,12 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+mcp = ["mcp>=2.2"]
 
 [project.scripts]
 jev-bench = "jev.eval:main"
 jev-drive = "jev.cli:main"
+jev-mcp = "jev.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
