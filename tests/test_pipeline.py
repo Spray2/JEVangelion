@@ -53,6 +53,18 @@ def test_an_escalating_gate_stops_before_the_compiler():
     result = run(case.request, jev=StagedJevClient(case.recorded_answers()),
                  llm=ScriptedLLMClient([]))
     assert result.escalated and result.plan is None
+    # An escalation is an answer too: it says why and what to clarify.
+    assert "la richiesta è ambigua" in result.text
+    assert "confidence 0.36 sotto la soglia 0.5" in result.text
+
+
+def test_an_escalation_on_an_english_request_is_explained_in_english():
+    jev = StagedJevClient({"shape": ("judgment", 0.29)})
+    result = run("Rate how likely chip stocks are to rise today.", jev=jev,
+                 llm=ScriptedLLMClient([]))
+    assert result.escalated
+    assert result.text.startswith("Escalation: the request is ambiguous")
+    assert "most likely shape: judgment" in result.text
 
 
 def test_a_core_plan_produces_decisions_and_no_text():
@@ -139,6 +151,8 @@ def test_a_blocking_lint_failure_stops_before_any_jev_round():
                  inputs={"customer_message": "disdiciamo"})
     assert result.blocked and result.rounds is None
     assert any("L4" in note for note in result.notes)
+    # The user is told why, not handed an empty answer.
+    assert result.text.startswith("Il piano compilato non ha superato") and "L4" in result.text
 
 
 def test_the_lint_retries_the_compiler_once_and_keeps_the_better_plan():

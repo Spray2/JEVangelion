@@ -39,6 +39,11 @@ class Labels:
     checks_failed: str
     escalated: str
     output: str
+    #: Shown instead of an empty answer when the gate escalates on an unclear
+    #: shape. Formatted with shape, confidence and floor.
+    unclear_request: str
+    #: Shown when the blocking lint stops the plan. Formatted with reasons.
+    plan_blocked: str
 
 
 IT = Labels(
@@ -50,6 +55,17 @@ IT = Labels(
     checks_failed="Verifiche non superate",
     escalated="Escalation",
     output="Testo generato",
+    unclear_request=(
+        "Escalation: la richiesta è ambigua e la pipeline si è fermata prima di usare JEV. "
+        "Non è chiaro se chiedi un giudizio su dati che fornisci, un testo da scrivere, "
+        "una decisione seguita da un testo o un dato da estrarre (forma più probabile: "
+        "{shape}, confidence {confidence:.2f} sotto la soglia {floor}). Riformulala "
+        "dicendo quale di queste vuoi e, se chiedi un giudizio, allega i dati da valutare."
+    ),
+    plan_blocked=(
+        "Il piano compilato non ha superato i controlli bloccanti e la pipeline si è "
+        "fermata prima di interrogare JEV: {reasons}. Riprova, oppure riformula la richiesta."
+    ),
 )
 
 EN = Labels(
@@ -61,6 +77,17 @@ EN = Labels(
     checks_failed="Checks not passed",
     escalated="Escalation",
     output="Generated text",
+    unclear_request=(
+        "Escalation: the request is ambiguous and the pipeline stopped before using JEV. "
+        "It is not clear whether you want a judgment on data you provide, a text to write, "
+        "a decision followed by a text, or a value to extract (most likely shape: {shape}, "
+        "confidence {confidence:.2f} below the {floor} threshold). Rephrase it saying which "
+        "one you want and, for a judgment, attach the data to assess."
+    ),
+    plan_blocked=(
+        "The compiled plan failed the blocking checks and the pipeline stopped before "
+        "asking JEV: {reasons}. Try again, or rephrase the request."
+    ),
 )
 
 

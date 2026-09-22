@@ -17,7 +17,7 @@ from .checks import MAX_REGENERATIONS, VerificationReport, verify
 from .client import JevClient, LLMClient
 from .compiler import COMPILER_PROMPT_VERSION, compile_plan
 from .contract import JevRole, Plan
-from .gate import GATE_V2, GateDecision, GateVariant, run_gate
+from .gate import GATE_V2, SHAPE_CONFIDENCE_FLOOR, GateDecision, GateVariant, run_gate
 from .lint import LintReport, lint_plan
 from .policy import PolicyOutcome, run_policy
 from .runtime import RunResult, fill_residual_prompt, resolved_facts, run_rounds
@@ -47,10 +47,15 @@ class PipelineResult:
     blocked: bool = False
     escalated: bool = False
     notes: list[str] = field(default_factory=list)
+    #: What the user reads when the run stops before any text exists, so a
+    #: stop is never an empty answer.
+    message: str = ""
 
     @property
     def text(self) -> str:
-        return self.synthesis.render() if self.synthesis else self.generated
+        if self.synthesis:
+            return self.synthesis.render()
+        return self.generated or self.message
 
 
 def run(
@@ -73,6 +78,10 @@ def run(
     if gate.escalate:
         result.escalated = True
         result.notes.append(f"gate escalated: {gate.rationale}")
+        result.message = labels.unclear_request.format(
+            shape=gate.task_shape.value, confidence=gate.shape_confidence,
+            floor=SHAPE_CONFIDENCE_FLOOR,
+        )
         return result
 
     if gate.jev_role is JevRole.NONE:
@@ -88,6 +97,7 @@ def run(
     if lint.blocked:
         result.blocked = True
         result.notes.append("lint blocked the plan: " + "; ".join(lint.feedback()))
+        result.message = labels.plan_blocked.format(reasons="; ".join(lint.feedback()))
         return result
     if lint.advisory_failures:
         result.notes.append(
