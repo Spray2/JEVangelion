@@ -7,7 +7,7 @@ small:
     when := term (("AND" | "OR") term)*
     term := "(" when ")" | operand OP value
     operand := qN | qN.score | qN.confidence | qN.probability | qN.choice
-             | any.confidence | any.uncertain | count.<qid>
+             | any.confidence | any.uncertain | count.<qid> | mean.<qid>
     OP := >= | > | <= | < | == | !=
 
 ``qN`` on its own resolves to the Noul probability, the Score expected level or
@@ -15,6 +15,8 @@ the Choice option id. ``any.confidence`` ranges over the answers that carry a
 confidence (Noul has none); ``any.uncertain`` is true when any answer sits in
 the band the runtime flags for review. ``count.<qid>`` is the number of items of
 a template question whose answer is above 0.5 — a count JEV is never asked for.
+``mean.<qid>`` is the average expected level of a template Score over its items,
+in levels — again computed in code.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ class Scope:
     item_key: str | None = None
     item_index: int | None = None
     counts: Mapping[str, int] = field(default_factory=dict)
+    means: Mapping[str, float] = field(default_factory=dict)
 
     def resolve(self, operand: str) -> Any:
         head, _, attr = operand.partition(".")
@@ -55,6 +58,10 @@ class Scope:
             if attr not in self.counts:
                 raise PolicyError(f"no count available for {attr!r}")
             return self.counts[attr]
+        if head == "mean":
+            if attr not in self.means:
+                raise PolicyError(f"no mean available for {attr!r}")
+            return self.means[attr]
         answer = self.answers.get(head)
         if answer is None:
             raise PolicyError(f"rule refers to unknown question {head!r}")
@@ -248,7 +255,7 @@ def run_policy(rules: Iterable[PolicyRule], scopes: Sequence[Scope]) -> PolicyOu
     for rule in rules:
         errors: list[str] = []
         evaluated = False
-        for scope in scopes:
+        for scope in _scopes_for(rule, scopes):
             try:
                 fired = evaluate(rule.when, scope)
             except PolicyError as exc:
@@ -260,6 +267,27 @@ def run_policy(rules: Iterable[PolicyRule], scopes: Sequence[Scope]) -> PolicyOu
         if not evaluated and errors:
             outcome.errors.append(errors[0])
     return outcome
+
+
+def _scopes_for(rule: PolicyRule, scopes: Sequence[Scope]) -> Sequence[Scope]:
+    """A rule that does not depend on the item is evaluated once, globally.
+
+    Aggregates (count., mean.) and scalar questions read the same in every
+    scope, so evaluating them per item fired the same rule once per item.
+    ``any.`` is the exception: it ranges over the scope's own answers, so an
+    item scope gives it a different, per-item meaning.
+    """
+    global_scopes = [s for s in scopes if s.item_key is None]
+    if not global_scopes or len(global_scopes) == len(scopes):
+        return scopes
+    operands = [value for kind, value in _tokenize(rule.when) if kind == "ident"]
+    if any(o.split(".", 1)[0] == "any" for o in operands):
+        return scopes
+    try:
+        evaluate(rule.when, global_scopes[0])
+    except PolicyError:
+        return scopes  # names an item question: per item, as before
+    return global_scopes
 
 
 def count_above(answers: Iterable[Answer], threshold: float = CONFIDENCE_FLOOR) -> int:

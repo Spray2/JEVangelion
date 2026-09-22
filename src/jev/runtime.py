@@ -187,16 +187,32 @@ class RunResult:
                 grouped.setdefault(inst.base_id, []).append(answer)
         return {qid: count_above(answers) for qid, answers in grouped.items()}
 
+    def item_scores(self) -> dict[str, list[float]]:
+        """The expected levels of each template Score, item by item."""
+        grouped: dict[str, list[float]] = {}
+        for inst in self.instances:
+            if inst.item_key is None or inst.question.type is not QuestionType.SCORE:
+                continue
+            answer = self.answers.get(inst.question.id)
+            if answer is not None and answer.score is not None:
+                grouped.setdefault(inst.base_id, []).append(float(answer.score))
+        return grouped
+
+    def means(self) -> dict[str, float]:
+        """Averages over items, like counts: computed here, never asked of JEV."""
+        return {qid: sum(v) / len(v) for qid, v in self.item_scores().items() if v}
+
     def scopes(self) -> list[Scope]:
-        counts = self.counts()
+        counts, means = self.counts(), self.means()
         scalar = self.scalar
-        scopes = [Scope(scalar, counts=counts)]
+        scopes = [Scope(scalar, counts=counts, means=means)]
         for key in self.item_keys:
             merged = {**scalar, **self.for_item(key)}
             index = next(
                 (i.item_index for i in self.instances if i.item_key == key), None
             )
-            scopes.append(Scope(merged, item_key=key, item_index=index, counts=counts))
+            scopes.append(Scope(merged, item_key=key, item_index=index,
+                                counts=counts, means=means))
         return scopes
 
 

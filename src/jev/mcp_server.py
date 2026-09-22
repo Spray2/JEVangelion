@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .cli import _summary
+from .compiler import COMPILER_PROMPT_VERSION, compiler_system_prompt
 from .driver import Driver, DriverError, Transcript
 from .pipeline import PipelineResult
 
@@ -120,6 +121,7 @@ def jev_start(
     inputs: dict[str, Any] | None = None,
     gate: str = "v2",
     lint: str = "code",
+    compiler_version: str = COMPILER_PROMPT_VERSION,
 ) -> dict[str, Any]:
     """Start a pipeline run and return its first pending call.
 
@@ -128,13 +130,20 @@ def jev_start(
         {"customer_message": "..."} or {"articles": [...]}.
     gate: "v2" (default) or "v3".
     lint: "code" (default; 6 calls on a pre+post case) or "full" (14 calls).
+    compiler_version: the compiler prompt, "v0.4" (default) or "v0.5", which
+        adds a Score's numeric range ("da 0 a 10") and means over items.
     """
     if gate not in ("v2", "v3") or lint not in ("code", "full"):
         raise DriverError("gate must be 'v2' or 'v3', lint 'code' or 'full'")
+    try:
+        compiler_system_prompt(compiler_version)
+    except FileNotFoundError as exc:
+        raise DriverError(f"no compiler prompt {compiler_version!r}") from exc
     driver = Driver(Transcript(
         request=request,
         inputs=dict(inputs or {}),
         gate=gate,
+        compiler_version=compiler_version,
         lint_with_jev=lint == "full",
     ))
     run_id = uuid.uuid4().hex[:12]

@@ -86,6 +86,17 @@ class Question:
     criteria: tuple[Any, ...] | None = None
     for_each: str | None = None
     criteria_from: str | None = None
+    #: A Score's range as the user asked for it ("da 0 a 10" -> (0, 10)). The
+    #: levels stay descriptive for JEV; the expected level is mapped onto this
+    #: range in code, linearly from the first level to the last.
+    scale: tuple[float, float] | None = None
+
+    def on_scale(self, level: float) -> float | None:
+        """An expected Score level on the user's range, or None without one."""
+        if self.scale is None or len(self.levels) < 2:
+            return None
+        low, high = self.scale
+        return low + level / (len(self.levels) - 1) * (high - low)
 
     @property
     def is_template(self) -> bool:
@@ -127,6 +138,7 @@ class Question:
             criteria=criteria,
             for_each=raw.get("for_each"),
             criteria_from=raw.get("criteria_from"),
+            scale=_parse_scale(raw.get("scale")) if qtype is QuestionType.SCORE else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -146,7 +158,20 @@ class Question:
             out["for_each"] = self.for_each
         if self.criteria_from is not None:
             out["criteria_from"] = self.criteria_from
+        if self.scale is not None:
+            out["scale"] = list(self.scale)
         return out
+
+
+def _parse_scale(raw: Any) -> tuple[float, float] | None:
+    """Two distinct numbers, [low, high]; anything else is ignored, not guessed."""
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return None
+    try:
+        low, high = float(raw[0]), float(raw[1])
+    except (TypeError, ValueError):
+        return None
+    return (low, high) if low != high else None
 
 
 @dataclass(frozen=True)

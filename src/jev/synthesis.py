@@ -46,6 +46,9 @@ class Labels:
     plan_blocked: str
     #: Heads the runtime inputs appended to a request that goes straight to the LLM.
     provided_data: str
+    #: The average of a template Score over its items.
+    mean: str
+    items: str
 
 
 IT = Labels(
@@ -69,6 +72,8 @@ IT = Labels(
         "fermata prima di interrogare JEV: {reasons}. Riprova, oppure riformula la richiesta."
     ),
     provided_data="Dati forniti",
+    mean="Media",
+    items="elementi",
 )
 
 EN = Labels(
@@ -92,12 +97,16 @@ EN = Labels(
         "asking JEV: {reasons}. Try again, or rephrase the request."
     ),
     provided_data="Provided data",
+    mean="Mean",
+    items="items",
 )
 
 
 @dataclass
 class Synthesis:
     decisions: list[str] = field(default_factory=list)
+    #: Averages over the items of a template Score, computed in code.
+    aggregates: list[str] = field(default_factory=list)
     #: (rule, needs_confirmation). Every rule the policy applied is shown; only
     #: the ones the request never states ask the user to confirm them.
     applied_rules: list[tuple[str, bool]] = field(default_factory=list)
@@ -113,6 +122,7 @@ class Synthesis:
         if self.decisions:
             lines.append(f"{self.labels.decisions}:")
             lines.extend(f"  - {d}" for d in self.decisions)
+        lines.extend(self.aggregates)
         if self.uncertain:
             lines.append(f"{self.labels.uncertain.capitalize()}:")
             lines.extend(f"  - {u}" for u in self.uncertain)
@@ -194,8 +204,36 @@ def _verdict(answer: Answer, question: Question | None) -> str:
         levels = question.levels if question else ()
         level = answer.level
         label = levels[level].what if levels and level is not None and level < len(levels) else ""
-        return f"{answer.score:.2f}{' (' + label + ')' if label else ''}"
+        return (f"{answer.score:.2f}{' (' + label + ')' if label else ''}"
+                f"{_on_scale(question, answer.score)}")
     return f"{answer.option} ({answer.confidence or 0.0:.2f})"
+
+
+def _on_scale(question: Question | None, level: float | None) -> str:
+    """ " -> 5.7 [0-10]" when the Score carries the user's range, else nothing."""
+    if question is None or level is None:
+        return ""
+    value = question.on_scale(level)
+    if value is None:
+        return ""
+    low, high = question.scale
+    return f" → {value:.1f} [{low:g}–{high:g}]"
+
+
+def aggregate_lines(result: RunResult, plan: Plan, labels: Labels = IT) -> list[str]:
+    """One line per template Score: its mean over the items, and the spread."""
+    lines: list[str] = []
+    for qid, scores in result.item_scores().items():
+        question = plan.question(qid)
+        mean = sum(scores) / len(scores)
+        what = (question.instructions if question else qid).rstrip("?")
+        spread = f"min {min(scores):.2f}, max {max(scores):.2f}"
+        if question is not None and question.scale is not None:
+            spread = (f"min {question.on_scale(min(scores)):.1f}, "
+                      f"max {question.on_scale(max(scores)):.1f}")
+        lines.append(f"{labels.mean} ({len(scores)} {labels.items}) — {what}: "
+                     f"{mean:.2f}{_on_scale(question, mean)} ({spread})")
+    return lines
 
 
 @dataclass(frozen=True)
@@ -312,6 +350,7 @@ def synthesize(
     fired = [t.rule for t in policy.triggered] if policy else []
     return Synthesis(
         decisions=decisions,
+        aggregates=aggregate_lines(result, plan, labels) if result else [],
         applied_rules=applied_rules(plan, fired, lint),
         uncertain=uncertain,
         disagreements=list(disagreements),
