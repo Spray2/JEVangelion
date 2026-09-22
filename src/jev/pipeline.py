@@ -85,8 +85,10 @@ def run(
         return result
 
     if gate.jev_role is JevRole.NONE:
-        # The gate's whole point: most requests never reach the compiler.
-        result.generated = llm.complete("", request)
+        # The gate's whole point: most requests never reach the compiler. The
+        # runtime inputs still go along: the main LLM answers the data, not
+        # just the request.
+        result.generated = llm.complete("", _with_inputs(request, inputs, labels))
         result.notes.append("no JEV role: the request went straight to the main LLM")
         return result
 
@@ -179,6 +181,17 @@ def _compile_and_lint(
 def _retry_prompt(prompt: str, verification: VerificationReport) -> str:
     failed = "\n".join(f"- {o.detail}" for o in verification.failures)
     return f"{prompt}\n\nLa versione precedente non ha superato queste verifiche:\n{failed}"
+
+
+def _as_text(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=1)
+
+
+def _with_inputs(request: str, inputs: Mapping[str, Any], labels: Labels) -> str:
+    if not inputs:
+        return request
+    data = "\n\n".join(f"{name}:\n{_as_text(value)}" for name, value in inputs.items())
+    return f"{request}\n\n{labels.provided_data}:\n\n{data}"
 
 
 def _labels_for(request: str) -> Labels:

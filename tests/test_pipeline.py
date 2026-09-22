@@ -48,6 +48,18 @@ def test_a_none_role_goes_straight_to_the_llm_and_never_compiles():
     assert llm.prompts[0][1] == case.request
 
 
+def test_a_none_role_still_hands_the_inputs_to_the_llm():
+    # Semiconductors in Chat: gate judgment/none, and the LLM answered without
+    # the articles it was meant to judge.
+    case = by_id("V05")
+    llm = ScriptedLLMClient(["6/10"])
+    run(case.request, jev=StagedJevClient(case.recorded_answers()), llm=llm,
+        inputs={"articles": [{"id": "a1", "text": "SOX +3%"}], "note": "oggi"})
+    prompt = llm.prompts[0][1]
+    assert prompt.startswith(case.request + "\n\n")
+    assert '"text": "SOX +3%"' in prompt and "note:\noggi" in prompt
+
+
 def test_an_escalating_gate_stops_before_the_compiler():
     case = by_id("H07")
     result = run(case.request, jev=StagedJevClient(case.recorded_answers()),

@@ -44,6 +44,8 @@ class Labels:
     unclear_request: str
     #: Shown when the blocking lint stops the plan. Formatted with reasons.
     plan_blocked: str
+    #: Heads the runtime inputs appended to a request that goes straight to the LLM.
+    provided_data: str
 
 
 IT = Labels(
@@ -66,6 +68,7 @@ IT = Labels(
         "Il piano compilato non ha superato i controlli bloccanti e la pipeline si è "
         "fermata prima di interrogare JEV: {reasons}. Riprova, oppure riformula la richiesta."
     ),
+    provided_data="Dati forniti",
 )
 
 EN = Labels(
@@ -88,6 +91,7 @@ EN = Labels(
         "The compiled plan failed the blocking checks and the pipeline stopped before "
         "asking JEV: {reasons}. Try again, or rephrase the request."
     ),
+    provided_data="Provided data",
 )
 
 
